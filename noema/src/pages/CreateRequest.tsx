@@ -1,31 +1,25 @@
-import { Box, Button, MenuItem, TextField, Typography } from "@mui/material";
-import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
-import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import {
-  addDays,
-  addYears,
-  differenceInMonths,
-  differenceInYears,
-} from "date-fns";
-import { useState } from "react";
-import styled from "styled-components";
+  Alert,
+  Box,
+  Button,
+  MenuItem,
+  TextField,
+  Typography,
+} from "@mui/material";
+import { addDays, addYears } from "date-fns";
+import { ChangeEvent, use, useCallback, useState } from "react";
+import { CountryDataContext } from "../store/country-data-context";
+import { PaymentContainer } from "../styles";
+import { sendFinancingRequest } from "../http";
+import { FinancingRequestFormData } from "../model/financingRequestFormData.model";
+import { ProjectCodeInput } from "../components/ProjectCodeInput";
+import { DateRangePicker } from "../components/DateRangePicker";
+import { InputField } from "../components/InputField";
 
 function CreateRequest() {
-  const PaymentContainer = styled.div`
-    display: flex;
-    & .amount {
-      flex: 3;
-    }
-    & .currency {
-      flex: 1;
-    }
-  `;
+  const countryDataCtx = use(CountryDataContext);
 
-  const today = new Date();
-  const minStartDate = addDays(today, 15); // 15 days from now
-  const maxEndDate = addYears(today, 3); // 3 years from now
-
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FinancingRequestFormData>({
     name: "",
     surname: "",
     country: "",
@@ -36,69 +30,45 @@ function CreateRequest() {
     paymentAmount: 0,
     currency: "",
   });
+  const [currencyDisabled, setCurrencyDisabled] = useState(false);
+  const [message, setMessage] = useState({
+    success: true,
+    show: false,
+  });
 
-  const handleChange = (e: any) => {
-    setFormData((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  };
-
-  const handleProjectCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let input = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-
-    // Extract only valid letters and numbers
-    const letters = input.slice(0, 4).replace(/[^A-Z]/g, "");
-    const numbers = input.slice(4, 8).replace(/[^1-9]/g, "");
-
-    let formatted = letters;
-    if (letters.length === 4) {
-      formatted += "-" + numbers;
-    }
-
-    setFormData((prev) => ({
-      ...prev,
-      projectCode: formatted,
-    }));
-  };
-
-  const handleSubmit = (e: any) => {
-    e.preventDefault();
-    // You can add validation or send to API here
-    console.log("Form submitted:", formData);
-  };
-
-  const handleStartDateChange = (newStart: Date | null) => {
-    setFormData((prev: any) => {
-      if (!newStart) {
-        return { ...prev };
+  const handleChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      if (e.target.name === "country") {
+        const isOPEC = countryDataCtx.countries.find(
+          (country) => country.code === e.target.value && country.opec
+        );
+        if (isOPEC)
+          setFormData((prev) => ({
+            ...prev,
+            currency: "USD",
+          }));
+        setCurrencyDisabled(!!isOPEC);
       }
-      const validityPeriodEnd =
-        differenceInYears(
-          prev.validityPeriodEnd,
-          formData.validityPeriodStart
-        ) < 1
-          ? addDays(newStart, 15)
-          : prev.validityPeriodEnd;
 
-      return {
+      setFormData((prev) => ({
         ...prev,
-        validityPeriodStart: newStart,
-        validityPeriodEnd,
-      };
+        [e.target.name]:
+          e.target.type === "number"
+            ? parseFloat(e.target.value)
+            : e.target.value,
+      }));
+    },
+    [countryDataCtx.countries]
+  );
+
+  const handleSubmit = async (e: any) => {
+    e.preventDefault();
+    const response = await sendFinancingRequest(formData);
+    console.log(response);
+    setMessage({
+      success: response.status === 201,
+      show: true,
     });
-  };
-
-  const handleEndDateChange = (newEnd: Date | null) => {
-    if (newEnd && differenceInYears(newEnd, formData.validityPeriodStart) < 1) {
-      alert("Validity period must be at least 1 year!");
-      return;
-    }
-
-    setFormData((prev: any) => ({
-      ...prev,
-      validityPeriodEnd: newEnd,
-    }));
   };
 
   return (
@@ -109,6 +79,7 @@ function CreateRequest() {
         maxWidth: 500,
         mx: "auto",
         mt: 4,
+        px: 4,
         display: "flex",
         flexDirection: "column",
         gap: 2,
@@ -118,7 +89,7 @@ function CreateRequest() {
         Create Request
       </Typography>
 
-      <TextField
+      <InputField
         label="Name"
         name="name"
         value={formData.name}
@@ -126,7 +97,7 @@ function CreateRequest() {
         required
       />
 
-      <TextField
+      <InputField
         label="Surname"
         name="surname"
         value={formData.surname}
@@ -142,52 +113,32 @@ function CreateRequest() {
         select
         required
       >
-        <MenuItem value="bug" key="bug">
-          Bug Report
-        </MenuItem>
-        <MenuItem value="feature" key="feature">
-          Feature Request
-        </MenuItem>
-        <MenuItem value="other" key="other">
-          Other
-        </MenuItem>
+        {countryDataCtx.countries.map((country, index) => (
+          <MenuItem value={country.code} key={index}>
+            {country.name}
+          </MenuItem>
+        ))}
       </TextField>
 
-      <TextField
-        placeholder="ABCD-9999"
-        label="Project Code"
-        variant="outlined"
-        fullWidth
+      <ProjectCodeInput
         value={formData.projectCode}
-        onChange={handleProjectCodeChange}
-        inputProps={{ maxLength: 9 }}
+        onChange={(value) =>
+          setFormData((prev) => ({ ...prev, projectCode: value }))
+        }
       />
 
-      <LocalizationProvider dateAdapter={AdapterDateFns}>
-        <DatePicker
-          label="Start Date"
-          value={formData.validityPeriodStart}
-          onChange={handleStartDateChange}
-          minDate={minStartDate}
-          maxDate={maxEndDate}
-        />
-        <DatePicker
-          label="End Date"
-          value={formData.validityPeriodEnd}
-          onChange={handleEndDateChange}
-          disabled={!formData.validityPeriodStart}
-          minDate={
-            formData.validityPeriodStart
-              ? addYears(formData.validityPeriodStart, 1)
-              : minStartDate
-          }
-          maxDate={
-            formData.validityPeriodStart
-              ? addYears(formData.validityPeriodStart, 3)
-              : maxEndDate
-          }
-        />
-      </LocalizationProvider>
+      <DateRangePicker
+        startDateLabel="Validity Period Start"
+        endDateLabel="Validity Period End"
+        startDate={formData.validityPeriodStart}
+        endDate={formData.validityPeriodEnd}
+        onStartDateChange={(date) =>
+          setFormData((prev) => ({ ...prev, validityPeriodStart: date }))
+        }
+        onEndDateChange={(date) =>
+          setFormData((prev) => ({ ...prev, validityPeriodEnd: date }))
+        }
+      />
 
       <TextField
         label="Description"
@@ -197,18 +148,24 @@ function CreateRequest() {
         multiline
         rows="3"
         fullWidth
-        required
         slotProps={{ htmlInput: { maxLength: 150 } }}
+        required
       />
       <PaymentContainer>
         <TextField
           className="amount"
           label="Payment amount"
-          type="number"
           name="paymentAmount"
           value={formData.paymentAmount}
           onChange={handleChange}
+          slotProps={{
+            htmlInput: {
+              type: "number",
+              pattern: "^\\d*\\.?\\d{0,2}$",
+            },
+          }}
           fullWidth
+          required
         />
         <TextField
           className="currency"
@@ -217,23 +174,25 @@ function CreateRequest() {
           value={formData.currency}
           onChange={handleChange}
           select
+          disabled={currencyDisabled}
           required
         >
-          <MenuItem value="bug" key="bug">
-            Bug Report
-          </MenuItem>
-          <MenuItem value="feature" key="feature">
-            Feature Request
-          </MenuItem>
-          <MenuItem value="other" key="other">
-            Other
-          </MenuItem>
+          {countryDataCtx.currencies.map((currency, index) => (
+            <MenuItem value={currency.code} key={index}>
+              {currency.symbol}
+            </MenuItem>
+          ))}
         </TextField>
       </PaymentContainer>
 
       <Button type="submit" variant="contained" color="primary">
         Submit
       </Button>
+      {!message.success ? (
+        <Alert severity="success">Request sent successfully!</Alert>
+      ) : (
+        <Alert severity="error">Request wasn't sent because of an error!</Alert>
+      )}
     </Box>
   );
 }
